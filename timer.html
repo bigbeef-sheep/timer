@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Square-End Precision Timer</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #1a1a1a;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+
+        #game-container {
+            text-align: center;
+            background: #252525;
+            padding: 30px;
+            border-radius: 30px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.7);
+            width: 420px;
+        }
+
+        /* 設定パネル */
+        #setup-panel {
+            background: #111;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            font-size: 0.85rem;
+        }
+
+        .setup-row {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        input[type="number"], input[type="color"] {
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            padding: 5px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        /* タイマービジュアル */
+        #timer-visual-area {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto 25px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #timer-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* 中央の数字表示（独立構造） */
+        .display-panel {
+            position: relative;
+            z-index: 10;
+            display: flex;
+            align-items: baseline; /* ベースラインで揃える */
+            font-weight: 800;
+            user-select: none;
+        }
+
+        /* 各桁のコンテナ：幅を固定することで数字が変わっても位置がズレない */
+        .digit-slot {
+            display: inline-block;
+            text-align: center;
+            width: 35px; 
+            font-size: 3.5rem;
+        }
+
+        .decimal-point {
+            width: 15px;
+            text-align: center;
+            font-size: 3rem;
+        }
+
+        .small-digit-slot {
+            display: inline-block;
+            text-align: center;
+            width: 22px;
+            font-size: 1.8rem; /* 小数点以下は小さく */
+            opacity: 0.9;
+        }
+
+        /* ボタン */
+        .btn-group { display: flex; gap: 15px; }
+        button {
+            flex: 1; padding: 16px; font-size: 1rem; font-weight: bold; cursor: pointer;
+            color: white; border: none; border-radius: 12px; transition: 0.2s;
+        }
+        #start-btn { background-color: #007bff; }
+        #start-btn.running { background-color: #dc3545; }
+        #reset-btn { background-color: #4a4a4a; }
+        
+        #message { font-weight: bold; height: 1.2em; margin-top: 15px; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="setup-panel">
+        <div class="setup-row" style="grid-column: span 2; border-bottom: 1px solid #333; padding-bottom: 10px;">
+            <label>制限時間 (秒)</label>
+            <input type="number" id="input-time" value="40" min="1">
+        </div>
+        <div class="setup-row">
+            <label>背景色</label>
+            <input type="color" id="color-bg" value="#000000">
+        </div>
+        <div class="setup-row">
+            <label>進行バー色</label>
+            <input type="color" id="color-ring" value="#ffce00">
+        </div>
+        <div class="setup-row">
+            <label>数字の色</label>
+            <input type="color" id="color-text" value="#ffffff">
+        </div>
+        <div class="setup-row">
+            <label>目盛り色</label>
+            <input type="color" id="color-ticks" value="#444444">
+        </div>
+    </div>
+
+    <div id="timer-visual-area">
+        <canvas id="timer-canvas" width="300" height="300"></canvas>
+        <div class="display-panel" id="main-display"></div>
+    </div>
+    
+    <div class="btn-group">
+        <button id="start-btn">START</button>
+        <button id="reset-btn">RESET</button>
+    </div>
+    
+    <p id="message"></p>
+</div>
+
+<script>
+    let maxTime = 40;
+    let timeLeft = 40;
+    let isRunning = false;
+    let timerId = null;
+
+    const canvas = document.getElementById('timer-canvas');
+    const ctx = canvas.getContext('2d');
+    const displayContainer = document.getElementById('main-display');
+    const startBtn = document.getElementById('start-btn');
+    const msgEl = document.getElementById('message');
+
+    // --- 初期設定・保存 ---
+    function saveSettings() {
+        const settings = {
+            time: document.getElementById('input-time').value,
+            bg: document.getElementById('color-bg').value,
+            ring: document.getElementById('color-ring').value,
+            text: document.getElementById('color-text').value,
+            ticks: document.getElementById('color-ticks').value
+        };
+        localStorage.setItem('precisionTimerV3', JSON.stringify(settings));
+        applyStyles();
+    }
+
+    function loadSettings() {
+        const saved = JSON.parse(localStorage.getItem('precisionTimerV3'));
+        if (saved) {
+            document.getElementById('input-time').value = saved.time;
+            document.getElementById('color-bg').value = saved.bg;
+            document.getElementById('color-ring').value = saved.ring;
+            document.getElementById('color-text').value = saved.text;
+            document.getElementById('color-ticks').value = saved.ticks;
+        }
+        applyStyles();
+        initTimer();
+    }
+
+    function applyStyles() {
+        displayContainer.style.color = document.getElementById('color-text').value;
+        drawVisuals();
+    }
+
+    // --- タイマー外観描画 ---
+    function initTimer() {
+        maxTime = parseFloat(document.getElementById('input-time').value) || 10;
+        timeLeft = maxTime;
+        buildDigitLayout();
+        drawVisuals();
+    }
+
+    // 数字の「枠」を先に作っておく（ズレ防止）
+    function buildDigitLayout() {
+        displayContainer.innerHTML = '';
+        const needsExtra = maxTime >= 100;
+        
+        // 整数部
+        if(needsExtra) displayContainer.innerHTML += '<span class="digit-slot" id="d-100">0</span>';
+        displayContainer.innerHTML += '<span class="digit-slot" id="d-10">0</span>';
+        displayContainer.innerHTML += '<span class="digit-slot" id="d-1">0</span>';
+        
+        // 小数点
+        displayContainer.innerHTML += '<span class="decimal-point">.</span>';
+        
+        // 小数部
+        displayContainer.innerHTML += '<span class="small-digit-slot" id="d-f1">0</span>';
+        displayContainer.innerHTML += '<span class="small-digit-slot" id="d-f2">0</span>';
+    }
+
+    function drawVisuals() {
+        const bgColor = document.getElementById('color-bg').value;
+        const ringColor = document.getElementById('color-ring').value;
+        const tickColor = document.getElementById('color-ticks').value;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = 135;
+        const thickness = 20;
+
+        // 1. 背景盤
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = bgColor;
+        ctx.fill();
+
+        // 2. 目盛り
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.strokeStyle = tickColor;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 60; i++) {
+            ctx.beginPath();
+            const len = i % 5 === 0 ? 15 : 8;
+            ctx.moveTo(0, -radius);
+            ctx.lineTo(0, -radius + len);
+            ctx.stroke();
+            ctx.rotate(Math.PI / 30);
+        }
+        ctx.restore();
+
+        // 3. 進行バー (端を角ばらせる)
+        const startAngle = -Math.PI / 2;
+        const progress = (maxTime - timeLeft) / maxTime;
+        const endAngle = startAngle + (Math.PI * 2 * progress);
+
+        if (progress > 0) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius - thickness/2, startAngle, endAngle);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = thickness;
+            ctx.lineCap = 'butt'; // これが重要！端を丸めず角にする
+            ctx.stroke();
+        }
+
+        updateDigitValues();
+    }
+
+    function updateDigitValues() {
+        const needsExtra = maxTime >= 100;
+        const str = timeLeft.toFixed(2).padStart(needsExtra ? 6 : 5, '0');
+        const parts = str.split('.'); // [整数部, 小数部]
+        const integerPart = parts[0].split('');
+        const fractionPart = parts[1].split('');
+
+        // 整数流し込み
+        if(needsExtra) {
+            document.getElementById('d-100').textContent = integerPart[0] === '0' ? ' ' : integerPart[0];
+            document.getElementById('d-10').textContent = (integerPart[0] === '0' && integerPart[1] === '0') ? ' ' : integerPart[1];
+            document.getElementById('d-1').textContent = integerPart[2];
+        } else {
+            document.getElementById('d-10').textContent = integerPart[0] === '0' ? ' ' : integerPart[0];
+            document.getElementById('d-1').textContent = integerPart[1];
+        }
+
+        // 小数流し込み
+        document.getElementById('d-f1').textContent = fractionPart[0];
+        document.getElementById('d-f2').textContent = fractionPart[1];
+    }
+
+    // --- 実行ロジック ---
+    function startTimer() {
+        if (isRunning) {
+            clearInterval(timerId);
+            isRunning = false;
+            startBtn.textContent = "RESUME";
+            startBtn.classList.remove('running');
+        } else {
+            if (timeLeft <= 0) initTimer();
+            isRunning = true;
+            startBtn.textContent = "PAUSE";
+            startBtn.classList.add('running');
+            msgEl.textContent = "";
+            
+            timerId = setInterval(() => {
+                timeLeft -= 0.01;
+                if (timeLeft <= 0) {
+                    timeLeft = 0;
+                    clearInterval(timerId);
+                    isRunning = false;
+                    startBtn.textContent = "START";
+                    startBtn.classList.remove('running');
+                    msgEl.textContent = "FINISH";
+                    msgEl.style.color = document.getElementById('color-ring').value;
+                }
+                drawVisuals();
+            }, 10);
+        }
+    }
+
+    startBtn.addEventListener('click', startTimer);
+    document.getElementById('reset-btn').addEventListener('click', () => {
+        clearInterval(timerId);
+        isRunning = false;
+        startBtn.textContent = "START";
+        startBtn.classList.remove('running');
+        msgEl.textContent = "";
+        initTimer();
+    });
+
+    document.querySelectorAll('#setup-panel input').forEach(input => {
+        input.addEventListener('input', () => {
+            if (!isRunning) {
+                saveSettings();
+                initTimer();
+            }
+        });
+    });
+
+    loadSettings();
+</script>
+
+</body>
+</html>
