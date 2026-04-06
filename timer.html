@@ -114,6 +114,48 @@
         #reset-btn { background-color: #4a4a4a; }
         
         #message { font-weight: bold; height: 1.2em; margin-top: 15px; text-transform: uppercase; }
+        :root {
+            
+    /* ここを調整するだけで全体が変わります */
+    --int-digit-width: 40px;   /* 整数1文字の幅 */
+    --small-digit-width: 25px; /* 小数1文字の幅 */
+    --digit-margin: 2px;       /* 数字同士の隙間 */
+    --int-font-size: 5rem;   /* 整数の大きさ */
+    --small-font-size: 3rem; /* 小数の大きさ */
+}
+
+.display-panel {
+    display: flex;
+    align-items: baseline;
+    justify-content: center; /* 中央寄せを確実に */
+}
+
+/* 整数スロット */
+.digit-slot {
+    display: inline-block;
+    width: var(--int-digit-width);
+    margin: 0 var(--digit-margin);
+    font-size: var(--int-font-size);
+    text-align: center;
+    /* デバッグ用：背景色をつけると「幅」が視覚的にわかります */
+    /* background: rgba(255,255,255,0.1); */
+}
+
+/* 小数点 */
+.decimal-point {
+    width: 15px;
+    text-align: center;
+    font-size: calc(var(--int-font-size) * 0.8);
+}
+
+/* 小数スロット */
+.small-digit-slot {
+    display: inline-block;
+    width: var(--small-digit-width);
+    margin: 0 var(--digit-margin);
+    font-size: var(--small-font-size);
+    text-align: center;
+}
     </style>
 </head>
 <body>
