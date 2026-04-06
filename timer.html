@@ -198,37 +198,165 @@
 </div>
 
 <script>
-    // --- 実行ロジック (実時間ベースに修正) ---
-    let startTime = 0;
-    let pausedTime = 0; // 一時停止用
+    let maxTime = 40;
+    let timeLeft = 40;
+    let isRunning = false;
+    let timerId = null;
 
+    // 実時間計測用の変数
+    let startTime = 0;
+    let pausedTime = 0; // 一時停止までに経過した時間の蓄積
+
+    const canvas = document.getElementById('timer-canvas');
+    const ctx = canvas.getContext('2d');
+    const displayContainer = document.getElementById('main-display');
+    const startBtn = document.getElementById('start-btn');
+    const msgEl = document.getElementById('message');
+
+    // --- 初期設定・保存 ---
+    function saveSettings() {
+        const settings = {
+            time: document.getElementById('input-time').value,
+            bg: document.getElementById('color-bg').value,
+            ring: document.getElementById('color-ring').value,
+            text: document.getElementById('color-text').value,
+            ticks: document.getElementById('color-ticks').value
+        };
+        localStorage.setItem('precisionTimerV3', JSON.stringify(settings));
+        applyStyles();
+    }
+
+    function loadSettings() {
+        const saved = JSON.parse(localStorage.getItem('precisionTimerV3'));
+        if (saved) {
+            document.getElementById('input-time').value = saved.time;
+            document.getElementById('color-bg').value = saved.bg;
+            document.getElementById('color-ring').value = saved.ring;
+            document.getElementById('color-text').value = saved.text;
+            document.getElementById('color-ticks').value = saved.ticks;
+        }
+        applyStyles();
+        initTimer();
+    }
+
+    function applyStyles() {
+        displayContainer.style.color = document.getElementById('color-text').value;
+        drawVisuals();
+    }
+
+    // --- タイマー外観描画 ---
+    function initTimer() {
+        maxTime = parseFloat(document.getElementById('input-time').value) || 10;
+        timeLeft = maxTime;
+        pausedTime = 0; // 経過時間をリセット
+        buildDigitLayout();
+        drawVisuals();
+    }
+
+    function buildDigitLayout() {
+        displayContainer.innerHTML = '';
+        const needsExtra = maxTime >= 100;
+        
+        if(needsExtra) displayContainer.innerHTML += '<span class="digit-slot" id="d-100">0</span>';
+        displayContainer.innerHTML += '<span class="digit-slot" id="d-10">0</span>';
+        displayContainer.innerHTML += '<span class="digit-slot" id="d-1">0</span>';
+        displayContainer.innerHTML += '<span class="decimal-point">.</span>';
+        displayContainer.innerHTML += '<span class="small-digit-slot" id="d-f1">0</span>';
+        displayContainer.innerHTML += '<span class="small-digit-slot" id="d-f2">0</span>';
+    }
+
+    function drawVisuals() {
+        const bgColor = document.getElementById('color-bg').value;
+        const ringColor = document.getElementById('color-ring').value;
+        const tickColor = document.getElementById('color-ticks').value;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const radius = 135;
+        const thickness = 20;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = bgColor;
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.strokeStyle = tickColor;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 60; i++) {
+            ctx.beginPath();
+            const len = i % 5 === 0 ? 15 : 8;
+            ctx.moveTo(0, -radius);
+            ctx.lineTo(0, -radius + len);
+            ctx.stroke();
+            ctx.rotate(Math.PI / 30);
+        }
+        ctx.restore();
+
+        const startAngle = -Math.PI / 2;
+        const progress = (maxTime - timeLeft) / maxTime;
+        const endAngle = startAngle + (Math.PI * 2 * progress);
+
+        if (progress > 0) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius - thickness/2, startAngle, endAngle);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = thickness;
+            ctx.lineCap = 'butt'; 
+            ctx.stroke();
+        }
+
+        updateDigitValues();
+    }
+
+    function updateDigitValues() {
+        const needsExtra = maxTime >= 100;
+        const str = timeLeft.toFixed(2).padStart(needsExtra ? 6 : 5, '0');
+        const parts = str.split('.');
+        const integerPart = parts[0].split('');
+        const fractionPart = parts[1].split('');
+
+        if(needsExtra) {
+            document.getElementById('d-100').textContent = integerPart[0] === '0' ? ' ' : integerPart[0];
+            document.getElementById('d-10').textContent = (integerPart[0] === '0' && integerPart[1] === '0') ? ' ' : integerPart[1];
+            document.getElementById('d-1').textContent = integerPart[2];
+        } else {
+            document.getElementById('d-10').textContent = integerPart[0] === '0' ? ' ' : integerPart[0];
+            document.getElementById('d-1').textContent = integerPart[1];
+        }
+
+        document.getElementById('d-f1').textContent = fractionPart[0];
+        document.getElementById('d-f2').textContent = fractionPart[1];
+    }
+
+    // --- 実行ロジック (実時間同期版) ---
     function startTimer() {
         if (isRunning) {
-            // 一時停止処理
+            // 一時停止
             clearInterval(timerId);
             isRunning = false;
-            pausedTime += Date.now() - startTime; // これまで経過した実時間を蓄積
+            pausedTime += Date.now() - startTime; 
             startBtn.textContent = "RESUME";
             startBtn.classList.remove('running');
         } else {
+            // 開始または再開
             if (timeLeft <= 0) {
                 initTimer();
-                pausedTime = 0;
             }
             isRunning = true;
+            startTime = Date.now();
             startBtn.textContent = "PAUSE";
             startBtn.classList.add('running');
             msgEl.textContent = "";
             
-            // 開始時刻を記録
-            startTime = Date.now();
-
             timerId = setInterval(() => {
-                // 「今この瞬間」と「開始した瞬間」の差分を計算
                 const currentTime = Date.now();
-                const elapsedTotal = (currentTime - startTime + pausedTime) / 1000;
+                const elapsedSinceLastStart = currentTime - startTime;
+                const totalElapsedMs = pausedTime + elapsedSinceLastStart;
                 
-                timeLeft = maxTime - elapsedTotal;
+                timeLeft = maxTime - (totalElapsedMs / 1000);
 
                 if (timeLeft <= 0) {
                     timeLeft = 0;
@@ -241,20 +369,32 @@
                     msgEl.style.color = document.getElementById('color-ring').value;
                 }
                 drawVisuals();
-            }, 16); // 16ms(約60fps)程度がスマホの描画負荷的にも最適です
+            }, 16); // 約60fps
         }
     }
 
-    // リセットボタンも初期化
+    startBtn.addEventListener('click', startTimer);
+    
     document.getElementById('reset-btn').addEventListener('click', () => {
         clearInterval(timerId);
         isRunning = false;
-        pausedTime = 0; // ここをリセット
+        pausedTime = 0;
         startBtn.textContent = "START";
         startBtn.classList.remove('running');
         msgEl.textContent = "";
         initTimer();
     });
+
+    document.querySelectorAll('#setup-panel input').forEach(input => {
+        input.addEventListener('input', () => {
+            if (!isRunning) {
+                saveSettings();
+                initTimer();
+            }
+        });
+    });
+
+    loadSettings();
 </script>
 
 </body>
